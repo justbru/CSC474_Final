@@ -631,7 +631,6 @@ void SkinnedMesh::BoneTransform(double frameTimeInSeconds, std::vector<glm::mat4
             }
 
             blendfactor = animBlendDur / totalAnimDur;
-            cout << blendfactor << endl;
             animBlendDur += (TimeInTicks - previousTicksInSeconds) * 8.f;
 
             AnimationTime_to = fmod(TimeInTicks, animduration_to);

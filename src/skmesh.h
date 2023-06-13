@@ -75,6 +75,18 @@ public:
             nextAnimation = nextanim;
     }
 
+    int getCurrentAnimation(){
+        return currentAnimation;
+    }
+
+    int getNextAnimation(){
+        return nextAnimation;
+    }
+
+    void setCurrentAnimation(int animNum){
+        currentAnimation = animNum;
+    }
+
     bool isBlending = false;
 
 protected:

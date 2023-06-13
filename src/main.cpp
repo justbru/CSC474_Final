@@ -94,6 +94,21 @@ public:
 	// shapes
 	shared_ptr<Shape> skyShape, rock;
 
+	// values for diver rotation
+	float diverRotationSpeed = 0.f;
+	float diverRotationTheta = 0.f;
+	float diverTakeOffAngleTimeTheta = 0.f;
+	bool diverLeanBack = true;
+	float diverRot = 0.0f;
+	float initialXVelocity = 0.0f;
+	float initialYVelocity = 0.15f;
+	float gravityAccel = -0.001f;
+	float diverYVelocity = 0.1f;
+
+	vec3 diverPos = vec3(-1, 0.5, -5.5);
+	bool takeoff = false;
+	bool crouching = false;
+
 	void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods)
 	{
 		if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
@@ -133,6 +148,23 @@ public:
 		{
 			mycam.d = 0;
 		}
+		if (key == GLFW_KEY_R && action == GLFW_RELEASE)
+		{
+			diverPos = vec3(-1, 0.5, -5.5);
+			diverTakeOffAngleTimeTheta = 0.0f;
+			diverRotationSpeed = 0.f;
+			diverRotationTheta = 0.f;
+			diverTakeOffAngleTimeTheta = 0.f;
+			diverLeanBack = true;
+			diverRot = 0.0f;
+			initialXVelocity = 0.0f;
+			initialYVelocity = 0.15f;
+			gravityAccel = -0.001f;
+			diverYVelocity = 0.1f;
+			takeoff = false;
+			crouching = false;
+			skmesh.setCurrentAnimation(6);
+		}
 
 		if (key == GLFW_KEY_SPACE && action == GLFW_PRESS)
 		{
@@ -142,54 +174,40 @@ public:
 
 		if (key == GLFW_KEY_1 && action == GLFW_RELEASE)
 		{
-			cout << "chaning anim" << endl;
 			skmesh.SetNextAnimation(0);
 		}
 		if (key == GLFW_KEY_2 && action == GLFW_RELEASE)
 		{
-			cout << "chaning anim" << endl;
-
 			skmesh.SetNextAnimation(1);
 		}
 		if (key == GLFW_KEY_3 && action == GLFW_RELEASE)
 		{
-			cout << "chaning anim" << endl;
-
 			skmesh.SetNextAnimation(2);
 		}
 		if (key == GLFW_KEY_4 && action == GLFW_RELEASE)
 		{
-			cout << "chaning anim" << endl;
-
+			crouching = true;
+			diverTakeOffAngleTimeTheta = 0.0f;
 			skmesh.SetNextAnimation(3);
 		}
 		if (key == GLFW_KEY_5 && action == GLFW_RELEASE)
 		{
-			cout << "chaning anim" << endl;
-
 			skmesh.SetNextAnimation(4);
 		}
 		if (key == GLFW_KEY_5 && action == GLFW_RELEASE)
 		{
-			cout << "chaning anim" << endl;
-
 			skmesh.SetNextAnimation(4);
-		}if (key == GLFW_KEY_6 && action == GLFW_RELEASE)
+		}
+		if (key == GLFW_KEY_6 && action == GLFW_RELEASE)
 		{
-			cout << "chaning anim" << endl;
-
 			skmesh.SetNextAnimation(5);
 		}
 		if (key == GLFW_KEY_7 && action == GLFW_RELEASE)
 		{
-			cout << "chaning anim" << endl;
-
 			skmesh.SetNextAnimation(6);
 		}
 		if (key == GLFW_KEY_8 && action == GLFW_RELEASE)
 		{
-			cout << "chaning anim" << endl;
-
 			skmesh.SetNextAnimation(7);
 		}
 	}
@@ -219,11 +237,8 @@ public:
 			return;
 		}
 
-		/*	if (!skmesh.LoadMesh(resourceDirectory + "/boblampclean.md5mesh")) {
-
-				printf("Mesh load failed\n");
-				return;
-			}*/
+		// set initial animation to the idle animation
+		skmesh.setCurrentAnimation(6);
 
 		// Initialize mesh.
 		skyShape = make_shared<Shape>();
@@ -391,9 +406,13 @@ public:
 		// glUniform3f(prog->getUniform("MatSpec"), 0.1, 0.1, 0.1);
 		// glUniform1f(prog->getUniform("MatShine"), 2.0);
 
-		glUniform3f(prog->getUniform("lightPos"), -2.f, 2.0, 2.0);
+		glUniform3f(prog->getUniform("lightPos"), 10.f, 20.0, 2.0);
 
-		M = glm::translate(glm::mat4(1.0f), vec3(0, 0, 0));
+		glm::mat4 Trans = glm::translate(glm::mat4(1.0f), vec3(-2, -0.5, -7));
+		glm::mat4 Scale = glm::scale(glm::mat4(1.0f), glm::vec3(3.f, 3.f, 3.f));
+		glm::mat4 RotX = glm::rotate(glm::mat4(1.0f), 0.5f, vec3(0, 1, 0));
+
+		M = Trans * RotX * Scale;
 		texLoc = glGetUniformLocation(prog->pid, "tex");
 		rockTex->bind(texLoc);
 		glUniformMatrix4fv(prog->getUniform("P"), 1, GL_FALSE, &P[0][0]);
@@ -412,10 +431,27 @@ public:
 		skinProg->bind();
 		texLoc = glGetUniformLocation(skinProg->pid, "tex");
 		sangle = -3.1415926f / 2.0f;
-		glm::mat4 Trans = glm::translate(glm::mat4(1.0f), vec3(2, 0, 0));
-		glm::mat4 RotX = glm::rotate(glm::mat4(1.0f), sangle, vec3(1, 0, 0));
-		glm::mat4 Scale = glm::scale(glm::mat4(1.0f), glm::vec3(0.001f, 0.001f, 0.001f));
-		M = Trans * Scale;
+
+		if (takeoff)
+		{
+			if (initialXVelocity > 0.15)
+				initialXVelocity -= 0.001;
+			if (diverPos.y > -1)
+				diverPos.x += initialXVelocity * 0.1f;
+
+			diverYVelocity = diverYVelocity <= -0.15f ? -0.15f : (diverYVelocity + gravityAccel);
+			diverPos.y += diverYVelocity * 0.1f;
+		}
+
+		Trans = glm::translate(glm::mat4(1.0f), diverPos);
+		RotX = glm::rotate(glm::mat4(1.0f), -diverRot, vec3(1, 0, 0));
+		Scale = glm::scale(glm::mat4(1.0f), glm::vec3(0.0014f, 0.0014f, 0.0014f));
+		glm::mat4 RotY = glm::rotate(glm::mat4(1.0f), -3.1415f / 2.f, vec3(0, 1, 0));
+		glm::mat4 TransOffset = glm::translate(glm::mat4(1.0f), vec3(0, -0.7, 0));
+		if (skmesh.getCurrentAnimation() != 3 && skmesh.getCurrentAnimation() != 6)
+			M = Trans * RotY * RotX * TransOffset * Scale;
+		else
+			M = TransOffset * Trans * RotY * RotX * Scale;
 
 		glUniform3fv(skinProg->getUniform("camPos"), 1, &mycam.pos[0]);
 		glUniformMatrix4fv(skinProg->getUniform("P"), 1, GL_FALSE, &P[0][0]);
@@ -427,9 +463,57 @@ public:
 		else
 			animSpeed = 1.f;
 
-		skmesh.setBoneTransformations(skinProg->pid, frametime*1.f);
+		skmesh.setBoneTransformations(skinProg->pid, frametime * 1.f);
 		skmesh.Render(texLoc);
 		skinProg->unbind();
+
+		if (diverTakeOffAngleTimeTheta > 3.f && crouching)
+		{
+			diverLeanBack = !diverLeanBack;
+			diverTakeOffAngleTimeTheta = 0.f;
+		}
+
+		if (diverPos.y > -1)
+		{
+			switch (skmesh.getCurrentAnimation())
+			{
+			case 3:
+				if (skmesh.getNextAnimation() != -1)
+				{
+					diverRotationSpeed = 0.01f;
+					takeoff = true;
+				}
+				else
+				{
+					initialXVelocity = diverRot;
+					if (diverLeanBack)
+						diverRotationSpeed = 0.0008f;
+					else
+						diverRotationSpeed = -0.0008f;
+				}
+				break;
+			case 4:
+				if (skmesh.getNextAnimation() != -1)
+					diverRotationSpeed = 0.06f;
+				else
+					diverRotationSpeed = 0.02f;
+				break;
+			case 7:
+				if (skmesh.getNextAnimation() != -1)
+					diverRotationSpeed = 0.03f;
+				else
+					diverRotationSpeed = 0.06f;
+				break;
+			default:
+				diverRotationSpeed = 0.0f;
+				break;
+			}
+		}
+		else
+			diverRotationSpeed = 0.0f;
+
+		diverRot += diverRotationSpeed;
+		diverTakeOffAngleTimeTheta += frametime;
 	}
 };
 
