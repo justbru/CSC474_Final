@@ -3,7 +3,6 @@
 
 #include "GLSL.h"
 #include "Program.h"
-#define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
 
 using namespace std;

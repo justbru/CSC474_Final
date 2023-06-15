@@ -2,6 +2,17 @@
 CPE/CSC 474 Lab base code Eckhardt/Dahl
 based on CPE/CSC 471 Lab base code Wood/Dunn/Eckhardt
 */
+#include "GLSL.h"
+#include "Program.h"
+#include "Shape.h"
+#include "WindowManager.h"
+#include "ParticleSystem.h"
+
+#include <tiny_obj_loader/tiny_obj_loader.h>
+
+// value_ptr for glm
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <iostream>
 #include <glad/glad.h>
@@ -11,6 +22,7 @@ based on CPE/CSC 471 Lab base code Wood/Dunn/Eckhardt
 #include "WindowManager.h"
 #include "Shape.h"
 #include "skmesh.h"
+#include "ParticleSystem.h"
 
 // value_ptr for glm
 #include <glm/gtc/type_ptr.hpp>
@@ -84,15 +96,17 @@ public:
 	WindowManager *windowManager = nullptr;
 
 	// Our shader program
-	std::shared_ptr<Program> psky, skinProg, prog;
+	std::shared_ptr<Program> psky, skinProg, prog, particleProg;
 
 	// skinnedMesh
 	SkinnedMesh skmesh;
 	// textures
-	shared_ptr<SmartTexture> skyTex, rockTex;
+	shared_ptr<SmartTexture> skyTex, rockTex, waterTex;
+
+	shared_ptr<ParticleSystem> particleEmitter;
 
 	// shapes
-	shared_ptr<Shape> skyShape, rock;
+	shared_ptr<Shape> skyShape, rock, water;
 
 	// values for diver rotation
 	float diverRotationSpeed = 0.f;
@@ -105,9 +119,14 @@ public:
 	float gravityAccel = -0.001f;
 	float diverYVelocity = 0.1f;
 
-	vec3 diverPos = vec3(-1, 0.5, -5.5);
+	vec3 diverPos = vec3(0.2, -0.7, -5.5);
 	bool takeoff = false;
 	bool crouching = false;
+
+	int currentAnimation = 6;
+	int currentLevel = 1;
+
+	float activeParticleEmitter = false;
 
 	void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods)
 	{
@@ -150,7 +169,23 @@ public:
 		}
 		if (key == GLFW_KEY_R && action == GLFW_RELEASE)
 		{
-			diverPos = vec3(-1, 0.5, -5.5);
+			// update start pos based on current level
+			switch (currentLevel)
+			{
+			case 1:
+				diverPos = vec3(0.2, -0.7, -5.5);
+				break;
+			case 2:
+				diverPos = vec3(-1, 0.5, -5.5);
+				break;
+			case 3:
+				diverPos = vec3(-0.7, 1.4, -5.5);
+				break;
+			case 4:
+				diverPos = vec3(-1.5, 2.2, -6.5);
+				break;
+			}
+
 			diverTakeOffAngleTimeTheta = 0.0f;
 			diverRotationSpeed = 0.f;
 			diverRotationTheta = 0.f;
@@ -164,12 +199,41 @@ public:
 			takeoff = false;
 			crouching = false;
 			skmesh.setCurrentAnimation(6);
+			currentAnimation = 6;
+			activeParticleEmitter = false;
 		}
 
 		if (key == GLFW_KEY_SPACE && action == GLFW_PRESS)
 		{
-			// mycam.pos = vec3(mycam.pos.x, mycam.pos.y-0.1, mycam.pos.z);
-			skmesh.print_animations(0);
+			if (!skmesh.isBlending)
+			{
+				if (currentAnimation == 6)
+				{
+					crouching = true;
+					diverTakeOffAngleTimeTheta = 0.0f;
+					skmesh.SetNextAnimation(3);
+					currentAnimation = 3;
+				}
+				else if (currentAnimation == 3)
+				{
+					skmesh.SetNextAnimation(4);
+					currentAnimation = 4;
+				}
+				else if (currentAnimation == 4)
+				{
+					skmesh.SetNextAnimation(7);
+					currentAnimation = 7;
+				}
+				else if (currentAnimation == 7)
+				{
+					skmesh.SetNextAnimation(4);
+					currentAnimation = 4;
+				}
+			}
+		}
+		if (key == GLFW_KEY_U && action == GLFW_PRESS)
+		{
+			currentLevel = currentLevel > 3 ? 1 : currentLevel + 1;
 		}
 
 		if (key == GLFW_KEY_1 && action == GLFW_RELEASE)
@@ -189,10 +253,6 @@ public:
 			crouching = true;
 			diverTakeOffAngleTimeTheta = 0.0f;
 			skmesh.SetNextAnimation(3);
-		}
-		if (key == GLFW_KEY_5 && action == GLFW_RELEASE)
-		{
-			skmesh.SetNextAnimation(4);
 		}
 		if (key == GLFW_KEY_5 && action == GLFW_RELEASE)
 		{
@@ -239,12 +299,18 @@ public:
 
 		// set initial animation to the idle animation
 		skmesh.setCurrentAnimation(6);
+		currentAnimation = 6;
 
 		// Initialize mesh.
 		skyShape = make_shared<Shape>();
 		skyShape->loadMesh(resourceDirectory + "/sphere.obj");
 		skyShape->resize();
 		skyShape->init();
+
+		water = make_shared<Shape>();
+		water->loadMesh(resourceDirectory + "/cube.obj");
+		water->resize();
+		water->init();
 
 		// Initialize rock
 		rock = make_shared<Shape>();
@@ -263,6 +329,11 @@ public:
 		rockTex = SmartTexture::loadTexture(strRock, false);
 		if (!rockTex)
 			cerr << "error: texture " << strRock << " not found" << endl;
+
+		auto strWater = resourceDirectory + "/water.jpeg";
+		waterTex = SmartTexture::loadTexture(strWater, false);
+		if (!waterTex)
+			cerr << "error: texture " << strWater << " not found" << endl;
 	}
 
 	// General OGL initialization - set OGL state here
@@ -336,6 +407,23 @@ public:
 		prog->addAttribute("vertPos");
 		prog->addAttribute("vertNor");
 		prog->addAttribute("vertTex");
+
+		particleProg = std::make_shared<Program>();
+		particleProg->setVerbose(true);
+		particleProg->setShaderNames(resourceDirectory + "/particle_vert.glsl", resourceDirectory + "/particle_frag.glsl");
+		if (!particleProg->init())
+		{
+			std::cerr << "One or more shaders failed to compile... exiting!" << std::endl;
+			exit(1);
+		}
+		particleProg->addUniform("P");
+		particleProg->addUniform("V");
+		particleProg->addUniform("M");
+		particleProg->addAttribute("vertPos");
+
+		particleEmitter = make_shared<ParticleSystem>();
+		particleEmitter->createParticleSystem(vec3(2, 2, -6), 0.1, 50);
+		particleEmitter->init();
 	}
 
 	/****DRAW
@@ -397,6 +485,42 @@ public:
 		skyTex->unbind();
 		psky->unbind();
 
+		// // draw water
+		// psky->bind();
+		// glUniformMatrix4fv(psky->getUniform("P"), 1, GL_FALSE, &P[0][0]);
+		// glUniformMatrix4fv(psky->getUniform("V"), 1, GL_FALSE, &V[0][0]);
+		// glUniformMatrix4fv(psky->getUniform("M"), 1, GL_FALSE, &M[0][0]);
+		// glUniform3fv(psky->getUniform("camPos"), 1, &mycam.pos[0]);
+
+		// glDisable(GL_DEPTH_TEST);
+		// skyShape->draw(psky, false);
+		// glEnable(GL_DEPTH_TEST);
+		// skyTex->unbind();
+		// psky->unbind();
+
+		prog->bind();
+		glUniform3f(prog->getUniform("MatAmb"), 0.1, 0.1, 0.1);
+		glUniform3f(prog->getUniform("MatDif"), 0.05, 0.36, 0.85);
+		glUniform3f(prog->getUniform("MatSpec"), 0.5, 0.5, 0.5);
+		glUniform1f(prog->getUniform("MatShine"), 5.0);
+
+		glUniform3f(prog->getUniform("lightPos"), 10.f, 20.0, 2.0);
+
+		glm::mat4 Trans = glm::translate(glm::mat4(1.0f), vec3(0, -2, 0));
+		glm::mat4 Scale = glm::scale(glm::mat4(1.0f), glm::vec3(300.f, 0.01f, 300.f));
+		glm::mat4 RotX = glm::rotate(glm::mat4(1.0f), 0.f, vec3(0, 1, 0));
+
+		M = Trans * RotX * Scale;
+		texLoc = glGetUniformLocation(prog->pid, "tex");
+		waterTex->bind(texLoc);
+		glUniformMatrix4fv(prog->getUniform("P"), 1, GL_FALSE, &P[0][0]);
+		glUniformMatrix4fv(prog->getUniform("V"), 1, GL_FALSE, &V[0][0]);
+		glUniformMatrix4fv(prog->getUniform("M"), 1, GL_FALSE, &M[0][0]);
+		// glUniform3fv(psky->getUniform("camPos"), 1, &mycam.pos[0]);
+
+		water->draw(prog, false);
+		prog->unbind();
+
 		// Load rock obj
 		prog->bind();
 
@@ -407,10 +531,11 @@ public:
 		// glUniform1f(prog->getUniform("MatShine"), 2.0);
 
 		glUniform3f(prog->getUniform("lightPos"), 10.f, 20.0, 2.0);
+		glUniform1f(prog->getUniform("MatShine"), 1.0);
 
-		glm::mat4 Trans = glm::translate(glm::mat4(1.0f), vec3(-2, -0.5, -7));
-		glm::mat4 Scale = glm::scale(glm::mat4(1.0f), glm::vec3(3.f, 3.f, 3.f));
-		glm::mat4 RotX = glm::rotate(glm::mat4(1.0f), 0.5f, vec3(0, 1, 0));
+		Trans = glm::translate(glm::mat4(1.0f), vec3(-2, -0.5, -7));
+		Scale = glm::scale(glm::mat4(1.0f), glm::vec3(3.f, 3.f, 3.f));
+		RotX = glm::rotate(glm::mat4(1.0f), 0.5f, vec3(0, 1, 0));
 
 		M = Trans * RotX * Scale;
 		texLoc = glGetUniformLocation(prog->pid, "tex");
@@ -436,8 +561,10 @@ public:
 		{
 			if (initialXVelocity > 0.15)
 				initialXVelocity -= 0.001;
-			if (diverPos.y > -1)
+			if (diverPos.y > -1.4)
 				diverPos.x += initialXVelocity * 0.1f;
+			else
+				diverPos.x += initialXVelocity * 0.05f;
 
 			diverYVelocity = diverYVelocity <= -0.15f ? -0.15f : (diverYVelocity + gravityAccel);
 			diverPos.y += diverYVelocity * 0.1f;
@@ -447,8 +574,9 @@ public:
 		RotX = glm::rotate(glm::mat4(1.0f), -diverRot, vec3(1, 0, 0));
 		Scale = glm::scale(glm::mat4(1.0f), glm::vec3(0.0014f, 0.0014f, 0.0014f));
 		glm::mat4 RotY = glm::rotate(glm::mat4(1.0f), -3.1415f / 2.f, vec3(0, 1, 0));
-		glm::mat4 TransOffset = glm::translate(glm::mat4(1.0f), vec3(0, -0.7, 0));
-		if (skmesh.getCurrentAnimation() != 3 && skmesh.getCurrentAnimation() != 6)
+		glm::mat4 TransOffset = glm::translate(glm::mat4(1.0f), vec3(0, -0.62, 0));
+
+		if ((skmesh.getCurrentAnimation() != 3 && skmesh.getCurrentAnimation() != 6) || (skmesh.getCurrentAnimation() == 3 && skmesh.getNextAnimation() == 4))
 			M = Trans * RotY * RotX * TransOffset * Scale;
 		else
 			M = TransOffset * Trans * RotY * RotX * Scale;
@@ -473,7 +601,7 @@ public:
 			diverTakeOffAngleTimeTheta = 0.f;
 		}
 
-		if (diverPos.y > -1)
+		if (diverPos.y > -1.9)
 		{
 			switch (skmesh.getCurrentAnimation())
 			{
@@ -510,7 +638,41 @@ public:
 			}
 		}
 		else
+		{
+			if (!activeParticleEmitter)
+			{
+				float rotationVal = fmod(diverRot, 3.1415f) < (3.1415f / 2.f) ? fmod(diverRot, 3.1415f) : 3.1415f - fmod(diverRot, 3.1415f);
+				float splashRadius = rotationVal / 10.f;
+				int totalParticles = 500 * (rotationVal / (3.1415f / 2.f));
+
+				if (skmesh.getCurrentAnimation() == 7){
+					totalParticles = 1000;
+					splashRadius = 0.1;
+				}
+				// 0.1 is a large splash radius, 0.01 is small, 50 is small amount of particles, 200 is large
+				particleEmitter->createParticleSystem(diverPos, splashRadius, totalParticles);
+				activeParticleEmitter = true;
+			}
 			diverRotationSpeed = 0.0f;
+		}
+
+		if (activeParticleEmitter)
+		{
+			particleProg->bind();
+
+			M = glm::mat4(1);
+			glUniformMatrix4fv(particleProg->getUniform("P"), 1, GL_FALSE, &P[0][0]);
+			glUniformMatrix4fv(particleProg->getUniform("V"), 1, GL_FALSE, &V[0][0]);
+			glUniformMatrix4fv(particleProg->getUniform("M"), 1, GL_FALSE, &M[0][0]);
+
+			particleEmitter->updateParticles();
+			particleEmitter->draw();
+			// rock->draw(particleProg, false);
+
+			particleProg->unbind();
+
+			// exit(1);
+		}
 
 		diverRot += diverRotationSpeed;
 		diverTakeOffAngleTimeTheta += frametime;
